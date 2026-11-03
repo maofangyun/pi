@@ -687,3 +687,139 @@ main()
 - **问题**：Agent 运行过程中，可用工具集（`context.tools`）可能会动态增减。如果每次都将完整工具列表作为独立参数传给模型而不记录在对话历史（Transcript）中，回放会话或大模型前缀缓存（Prompt KV Caching）就会失效。
 - **追踪**：`declareToolChanges`（L342-L372）在每次往上下文追加消息前，计算历史记录已声明的工具与当前 `context.tools` 的差集（`toolsAdded` / `toolsRemoved`），并将增量变化写入 `SystemMessage`。
 - **设计收益**：让对话历史（Transcript）成为自包含的完整日志，保证任何时刻重放历史消息都能精确还原当时的工具状态，同时避免修改历史消息前缀以最大化 LLM 的 KV Cache 命中率。
+
+
+---
+
+## 9. 深入剖析 `async / await`、异步迭代与事件循环底层机制（结合 `packages/ai/src/utils/event-stream.ts`）
+
+> 本章整理自对话中关于 `for await (const event of s)` 及其背后的 Promise 生命周期、V8 栈帧挂起、微任务队列调度、操作系统与 Node.js 协作机制的深度问答。
+
+### 9.1 核心语法：`for await...of` 异步迭代协议
+
+- **解决的问题**：普通的 `for...of` 循环用于遍历内存中已全部就绪的同步集合（如 `Array`、`Set`）；而 `for await...of`（ES2018）专门用于消费**随时间推移逐步到达的流式数据（Streaming Data）**，如 LLM 模型的逐字推流（Token Chunk）、网络 SSE 连接或文件分块流。
+- **底层协议解构**：
+  任何实现了 `[Symbol.asyncIterator]()` 方法的对象均为**异步可迭代对象（[`AsyncIterable`](file:///d:/WebstormProjects/pi/packages/ai/src/utils/event-stream.ts#L26)）**。
+  语句 `for await (const event of s)` 本质上是以下循环的语法糖：
+  ```typescript
+  const iterator = s[Symbol.asyncIterator]();
+  while (true) {
+    // 异步等待下一个 chunk 到达
+    const { value: event, done } = await iterator.next();
+    if (done) break;
+    // 循环体代码：处理 event
+    handleEvent(event);
+  }
+  ```
+- **Java 视角对比**：
+  - Java 中处理异步流通常采用 **Push 模式（推）**，例如 Reactive Streams（Project Reactor 的 `Flux.subscribe(event -> ...)`）；
+  - TypeScript 的 `for await...of` 采用 **Pull 模式（拉）**，将流式消费还原为直观的命令式循环，且支持标准的 `break`（提前取消并触发资源清理）、`continue` 和 `try...catch` 异常捕获。
+
+### 9.2 等待消息时：调用栈帧（Call Stack Frame）与微任务队列的状态
+
+- **问题**：在 `for await` 等待模型返回下一个数据块期间，栈帧在调用栈中是什么状态？是放入了微任务队列中轮询吗？
+- **核心结论**：**它既不在调用栈（Call Stack）中，也绝不在微任务队列（Microtask Queue）中。**
+  - **栈帧从调用栈弹出**：当前 `async` 函数的执行栈帧已完全从 Call Stack 弹出，主线程立即被释放。
+  - **现场保存在堆内存（Heap）**：局部变量、程序计数器（PC 指针）、作用域链被打包为 Generator 状态机保存在堆内存（在 V8 中对应 `AsyncFunctionState`）。
+  - **Promise 处于 Pending 状态**：在 [`EventStream`](file:///d:/WebstormProjects/pi/packages/ai/src/utils/event-stream.ts#L79) 中，等待操作依赖 `new Promise((resolve) => this.waiting.enqueue(resolve))`。此时该 Promise 处于 Pending 状态，其注册的续体回调仅作为数据保存在堆中对象的 `[[PromiseFulfillReactions]]` 数组中。
+  - **微任务队列为空**：如果未就绪的任务提前塞入微任务队列，事件循环会死循环执行它导致 CPU 空转甚至卡死主线程。
+
+### 9.3 调用栈空闲时，什么时候会出现“有其他代码要执行”？
+
+- **问题**：当前循环挂起、调用栈空闲时，没有其他代码执行时线程在干什么？又会在什么时候去执行“其他代码”？
+- **机制剖析**：
+  1. **无其他任务时（OS Sleep）**：若无其它工作，Node.js 底层的 `libuv` 会通过操作系统的 I/O 多路复用系统调用（Linux `epoll_wait`、Windows `IOCP` 的 `GetQueuedCompletionStatus`）让主线程进入**操作系统级阻塞休眠**，CPU 占用率为 0%，等待物理网卡中断唤醒。
+  2. **有其他任务时（见缝插针的高并发）**：在等待模型响应的几百毫秒网络空窗期内，主线程可随时被事件循环唤醒去执行其它代码：
+     - **UI 加载动画**：`setInterval(() => renderSpinner(), 80)` 每 80ms 触发一次，在空窗期刷新终端 Spinner 旋转动画；
+     - **用户交互监听**：用户按下 `Ctrl+C` 或快捷键，操作系统的键盘中断触发 `process.stdin.on('data')` 回调执行取消逻辑；
+     - **并发任务 / 子 Agent**：通过 `Promise.all` 同时启动的任务 B 数据包先到达，主线程立即切去执行任务 B 的循环体；
+     - **服务端并发连接**：在 Web/RPC 场景下，用户 A 等待模型流时，主线程可以并发处理用户 B 进来的 HTTP 请求。
+
+### 9.4 数据到达时，为什么不能直接同步执行，而是必须推入微任务队列？
+
+- **问题**：阶段 2 数据既然已经通过网络到达，为什么不让 `resolve()` 直接就地同步调用挂起的函数代码？
+- **三大架构原因**：
+  1. **防止重入（Re-entrancy）与调用栈溢出（Stack Overflow）**：
+     若同步执行，调用栈将变成：`网络I/O回调 -> push() -> resolve() -> 循环体`。若循环体又触发了数据推送，栈帧会不断深层嵌套累加，极快导致 `RangeError: Maximum call stack size exceeded`。通过微任务队列，触发方能完整退栈，让事件循环在干净的栈上执行循环体。
+  2. **保证触发方代码的执行完整性（Run-to-completion 原则）**：
+     在 `resolve()` 被调用的函数内，后续往往还有状态更新或收尾工作。若直接跳去执行循环体，循环体访问到的上下文可能处于未完成收尾的中间不稳定状态。
+  3. **防范 Zalgo 现象（保证执行时序的绝对确定性）**：
+     前端经典原则“Don't release Zalgo”规定：API 绝不可“有时同步执行、有时异步执行”。ECMAScript 规范强制要求：**无论 Promise 是否立即可用，其决议后的回调一律放入微任务队列异步调度**。
+- **Java 视角对比**：
+  Java `CompletableFuture.thenAccept` 默认在调用 `complete()` 的线程上同步执行，常引发死锁或线程借用隐患，因此推荐 `thenAcceptAsync`；JavaScript 则直接在语言规范层面将异步微任务作为强制的安全基线。
+
+### 9.5 什么是“Promise 决议后的续体（Continuation）”？具体包含哪些代码？
+
+- **定义**：从 `await` 暂停点切开，剩下的、待唤醒时要执行的**下半截代码**（包含局部变量赋值、后续语句及循环体），在底层被引擎打包为类似 `resume(result)` 的微任务闭包。
+- **双层嵌套续体拆解**：
+  1. **第一层：底层生成器内部的续体**（[`packages/ai/src/utils/event-stream.ts:79-82`](file:///d:/WebstormProjects/pi/packages/ai/src/utils/event-stream.ts#L79-L82)）：
+     ```typescript
+     // 挂起点
+     const result = await new Promise<IteratorResult<T>>((resolve) => this.waiting.enqueue(resolve));
+     // === 以下是第一层续体 ===
+     if (result.done) return;
+     yield result.value;
+     ```
+  2. **第二层：外部业务代码中的续体**（用户 `for await` 循环体）：
+     ```typescript
+     // 挂起点
+     const { value: event, done } = await iterator.next();
+     // === 以下是第二层续体（包含整个业务逻辑与后续迭代请求） ===
+     if (done) break;
+     switch (event.type) {
+       case 'text_delta': process.stdout.write(event.delta); break;
+       // ...全部 case 业务逻辑...
+     }
+     // 执行完毕后，进入下一轮 while 循环并发起下一次 iterator.next()
+     ```
+
+### 9.6 两层续体是一个微任务还是两个微任务？
+
+- **结论**：**是两个独立的微任务（Two distinct Microtasks），但在同一个微任务清空阶段（Microtask Checkpoint）连续执行**。
+- **执行因果链**：
+  ```
+  push(event) 触发 resolve()
+    ↓
+  [微任务队列入队: 微任务 1]
+    ↓ (事件循环调度取出)
+  执行微任务 1: 生成器推进至 yield result.value
+    ↓ (yield 触发对外部 iterator.next() Promise 的决议)
+  [微任务队列入队: 微任务 2]
+    ↓ (微任务队列尚未清空，直接继续出队)
+  执行微任务 2: 恢复外层 async 函数，运行 for await 业务循环体
+  ```
+- **为什么分两次**：外层的 `await iterator.next()` 依赖内部生成器 `yield` 产生的最终值，存在严格的因果依赖链路；但由于事件循环的规则是“清空微任务队列直至为空（Drain to completion）”，因此微任务 2 紧随微任务 1 执行，中间不会被宏任务打断。
+
+### 9.7 代码中没有写 `new Promise`，另一个 Promise 是从哪里来的？
+
+- **机制解密**：该 Promise 是由 JavaScript 引擎根据 **`async *`（异步生成器函数）语法**在底层自动隐式创建并返回的。
+- **源码对应**（[`event-stream.ts:72`](file:///d:/WebstormProjects/pi/packages/ai/src/utils/event-stream.ts#L72)）：
+  ```typescript
+  async *[Symbol.asyncIterator](): AsyncIterator<T> { ... }
+  ```
+- **语言运行规则**：
+  1. 普通 `async function`：内部写 `return 42`，引擎调用时会自动返回隐式的 `Promise.resolve(42)`；
+  2. 异步生成器 `async function*`：**每次外部调用 `iterator.next()` 时，V8 引擎在底层自动隐式创建并返回一个新的 `Promise`**；
+  3. 当生成器内部执行到 `yield x` 时，引擎自动调用该隐式 Promise 的 `resolve({ value: x, done: false })`；遇到 `return` 时 resolve `{ value, done: true }`；抛出异常时 reject。
+- **双 Promise 对比**：
+  - **显式 Promise**（`event-stream.ts:79` 手写的 `new Promise`）：负责在队列无数据时挂起内部生成器；
+  - **隐式 Promise**（`async *` 规范自动生成的）：负责让外层 `for await` 等待下一次 `yield` 的数据。
+
+### 9.8 “事件循环调度”是 Node.js 还是操作系统的功能？
+
+- **结论**：**事件循环调度是 Node.js（用户态运行环境）的功能，但建立在操作系统底层的多路复用能力之上。**
+- **分工架构**：
+  - **Node.js（用户态，`libuv` + V8 引擎）**：维护微任务队列、宏任务队列、定时器堆；决定哪个 JS 回调先执行；将执行上下文压入 V8 调用栈；
+  - **操作系统内核（内核态，Linux `epoll` / Windows `IOCP` / macOS `kqueue`）**：监听物理硬件（网卡中断、键盘中断）；维护网络缓冲区；在数据到达时唤醒被阻塞的 Node.js 进程。
+- **Java 视角对比**：
+  操作系统的作用等同于底层 `epoll`；而 Node.js 的 `libuv` 扮演的角色与 Java 领域的 **Netty（`NioEventLoop` / `EventLoopGroup`）** 完全一致（在用户态循环中通过 `select()` 收集就绪 I/O 并派发业务 Handler）。
+
+### 9.9 “触发 resolve() 才会产生微任务”的精确边界辨析
+
+- **辨析**：代码写了 `await p`，微任务是不是早就加入队列了？**不是。**
+- **Promise 生命周期两阶段**：
+  1. **注册阶段（Pending 状态）**：
+     执行 `await p` 时，Promise 仍处于 Pending 状态。引擎仅把续体函数作为数据结构挂载在堆内存该 Promise 对象的 `[[PromiseFulfillReactions]]` 内部数组中，**此时微任务队列没有任何任务**。
+  2. **入队阶段（调用 `resolve()` 时）**：
+     当且仅当数据到达、代码执行 `resolve(val)` 的那一刻，V8 调用规范的 `HostEnqueuePromiseJob`，遍历 `[[PromiseFulfillReactions]]` 中的回调，**正式打包为微任务推入微任务队列**。
+- **唯一例外**：只有当被 `await` 的 Promise 在执行 `await` 之前就已经是决议状态（如 `Promise.resolve("ready")`）时，`await` 才会当场直接把微任务推入队列。但在流式 I/O 场景下，Promise 初始必定处于 Pending，因此始终遵循“先调用 `resolve()`，后产生/入队微任务”的顺序。
