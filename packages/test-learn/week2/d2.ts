@@ -6,13 +6,14 @@ import type {
     StopReason,
     SystemMessage,
     TextContent,
-    ThinkingContent,
+    ThinkingContent, Tool,
     ToolCall,
     ToolResultMessage,
     Usage,
     UserMessage,
 } from "@earendil-works/pi-ai";
 import {styleText} from "node:util";
+import {obj, opt, str} from "@earendil-works/pi-schema";
 
 // 初始化模型集合并获取deepseek
 const models = builtinModels();
@@ -24,13 +25,23 @@ if (!model) {
 // 构建对话上下文
 const userMessage: UserMessage = {
     role: "user",
-    content: "简单打个招呼",
+    content: "当前的时间",
     timestamp: Date.now(),
 }
 
+// 工具信息
+const tools: Tool[] = [{
+    name: "get_time",
+    description: "获取当前的时间",
+    parameters: obj({
+        timezone: opt(str({description: "可选的时区（例如：America/New_York 或 Asia/Shanghai）"}))
+    })
+}]
+
 const context: Context = {
     systemPrompt: "你是一个得力的智能助手",
-    messages: [userMessage]
+    messages: [userMessage],
+    tools: tools
 }
 
 // 流式调用
@@ -83,6 +94,40 @@ for await (const event of eventStream) {
 }
 
 
+const assistantMessage = await eventStream.result();
+
+context.messages.push(assistantMessage);
+
+const toolCalls = assistantMessage.content.filter(b => b.type === 'toolCall');
+
+for (const call of toolCalls) {
+    let result;
+    if (call.name == "get_time"){
+        result = new Date().toLocaleString('zh-CN', {
+            timeZone: typeof call.arguments.timezone === 'string' ? call.arguments.timezone : 'Asia/Shanghai',
+            dateStyle: 'full',
+            timeStyle: 'long'
+        });
+    } else {
+        result = "未知工具";
+    }
+
+    context.messages.push({
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: call.name,
+        content: [{type: "text", text: result}],
+        isError: false,
+        timestamp: Date.now()
+    });
+
+    const stream = await models.stream(model, context, {"reasoningEffort": "high"});
+
+    const message = await stream.result();
+
+    console.log(message);
+
+}
 
 
 
