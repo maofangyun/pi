@@ -45,11 +45,20 @@ const context: Context = {
 }
 
 // 流式调用
-const eventStream = await models.stream(model, context, {"reasoningEffort": "high"});
+const startTime = Date.now();
+const eventStream = await models.stream(model, context, {
+    "reasoningEffort": "high",
+    onPayload: (payload) => {
+        console.log("=== 发给 DeepSeek 的原始请求体 ===");
+        console.dir(payload, { depth: null });
+    }
+});
 
 for await (const event of eventStream) {
     switch (event.type) {
         case 'start':
+            const firstTime = Date.now();
+            console.log(`首Token延迟的时间是: ${firstTime - startTime} ms`);
             console.log(`开始生成，使用模型: ${event.partial.model}`);
             break;
         case 'text_start':
@@ -121,10 +130,15 @@ for (const call of toolCalls) {
         timestamp: Date.now()
     });
 
-    const stream = await models.stream(model, context, {"reasoningEffort": "high"});
+    const message = await models.complete(model, context, {
+        "reasoningEffort": "high",
+        onPayload: (payload) => {
+            console.log("=== 发给 DeepSeek 的原始请求体 ===");
+            console.dir(payload, { depth: null });
+        }
+    });
 
-    const message = await stream.result();
-
+    console.log("=== 最终结果 ===");
     console.log(message);
 
 }
