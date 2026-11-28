@@ -1,0 +1,32 @@
+{
+	"workspace": {
+		"workspaceDir": "./assistant-workspace",
+		"notesDir": null,
+		"rawPdfsDir": null
+	},
+	"models": {
+		"main": {
+			"provider": "deepseek",
+			"model": "deepseek-v4-pro",
+			"thinking": "high",
+			"baseUrl": null,
+			"apiKeyEnv": "DEEPSEEK_API_KEY"
+		},
+		"vision": null,
+		"judge": null
+	},
+	"search": null,
+	"ollama": {
+		"baseUrl": "http://127.0.0.1:11434",
+		"embedModel": "bge-m3",
+		"rerankModel": "bge-reranker-v2-m3",
+		"sidecarModel": "qwen2.5:3b"
+	},
+	"features": {
+		"statusBar": true,
+		"l2MicroCompact": true,
+		"reranker": true,
+		"sidecar": true,
+		"dockerSandbox": true
+	}
+}

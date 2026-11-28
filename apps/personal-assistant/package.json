@@ -1,0 +1,34 @@
+{
+	"name": "@earendil-works/pi-personal-assistant",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Local Windows personal AI assistant built on pi via ExtensionAPI and SDK",
+	"type": "module",
+	"bin": {
+		"pi-assistant": "src/cli.ts"
+	},
+	"scripts": {
+		"start": "node --import ./src/source-resolver.ts src/cli.ts",
+		"init": "node --import ./src/source-resolver.ts src/cli.ts --init",
+		"eval": "node --import ./src/source-resolver.ts evals/rag/run-rag-eval.ts --ablation",
+		"check": "node ../../scripts/biome-check.mjs && tsc --noEmit",
+		"format": "node ../../scripts/biome-check.mjs --write",
+		"test": "vitest --run"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@earendil-works/pi-agent-core": "1.6.1",
+		"@earendil-works/pi-ai": "1.6.1",
+		"@earendil-works/pi-coding-agent": "1.6.1",
+		"@earendil-works/pi-tui": "1.6.1",
+		"typebox": "1.3.27",
+		"yaml": "2.9.0"
+	},
+	"devDependencies": {
+		"@types/node": "22.19.19",
+		"typescript": "7.0.2",
+		"vitest": "4.1.12"
+	}
+}
