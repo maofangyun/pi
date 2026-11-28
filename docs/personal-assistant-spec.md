@@ -20,25 +20,36 @@
 
 | 阶段 | 覆盖范围 |
 |---|---|
-| **一期（MVP 核心）** | 场景 A（信息与知识管理、上千篇 Markdown/PDF 笔记整理）与场景 B（本地效率与数据处理自动化）；单 Agent + Skills；多会话隔离；`<agent_status>` 状态栏与可见 TODO；三层压缩与保真机制；三层分离目录 + 双层记忆 + 本地 Ollama 混合 RAG；极简核心工具 + 联网搜索 + 云端视觉分析工具；四层执行安全（目录边界、写前快照/Git 回滚、写后自动校验、两段式确认、本地 Ollama Sidecar）+ Windows Docker 沙箱；默认交付单文件交互式 HTML；`doctor` 自检与脚本沉淀为 Skill；会话内异步（安全打断、补充入队、`monitor_shell`）；RAG 召回率评估 + 端到端/轨迹前缀回归集 + 异源 Judge + 本地 Trace/成本/缓存统计 + `/feedback` + 消融开关；手动 `/evolve` 离线持续进化闭环。 |
-| **二期（扩展演进）** | 场景 C（日常事务协同：邮件/日程/IM 远程渠道）；场景 D（外部网页/App 自动化：Playwright DOM/SoM + HITL Auth）；本地轻事件源（目录监听自动建索引、Cron 定时任务、Windows 桌面通知）；长期修剪体检（Curator）；多 Agent 协作（星型管理者只读调研子 Agent、HTML 渲染截图 Proposer-Reviewer 审核）；PPT/视频等独立多媒体 Skill。 |
+| **一期（MVP 核心）** | 场景 A（信息与知识管理、上千篇 Markdown/PDF 笔记整理）与场景 B（本地效率与数据处理自动化）；单 Agent + Skills；`TaskRun` 统一状态机与 `partially_completed` 口径；多会话隔离与生命周期管理；`<agent_status>` 状态栏与可见 TODO；三层压缩与保真机制；事实/推断/假设区分规范；三层分离目录 + 双层记忆 + 记忆控制命令 + 凭证写入底线 + 本地 Ollama 混合 RAG；工具元数据/停用与 MCP 权限撤销治理 + 联网搜索 + 云端视觉分析（带媒体上限）；四层执行安全（目录边界、写前快照/Git 回滚/副作用幂等、写后自动校验、参数绑定两段式确认与审计、fail-closed 本地 Ollama Sidecar）+ Windows Docker 沙箱；默认交付单文件交互式 HTML；`doctor` 自检与脚本沉淀为 Skill；会话内异步（安全打断、补充入队、`monitor_shell`）与跨进程检查点恢复；RAG 召回率评估 + 端到端/轨迹前缀回归集 + 异源 Judge + 本地 Trace/成本/缓存/留存清理 + `/feedback` + 消融开关；离线 Mock 测试、纯键盘 TUI 与 `pi` 升级回归；手动 `/evolve` 离线持续进化闭环。 |
+| **二期（扩展演进）** | 场景 C（日常事务协同：邮件/日程/IM 远程渠道）；场景 D（外部网页/App 自动化：Playwright DOM/SoM + HITL Auth）；本地轻事件源（目录监听自动建索引、Cron 定时任务、Windows 桌面通知）；长期修剪体检（Curator）；多 Agent 协作（星型管理者只读调研子 Agent、子 Agent 结论冲突升级、HTML 渲染截图 Proposer-Reviewer 审核）；PPT/视频等独立多媒体 Skill。 |
 | **明确不做** | 自研 Web UI；语音交互（纯文字输入即可）；主模型自训练/Mid-training/RL；跨组织 A2A 协议、去中心化 Swarm、群聊辩论、Agent 社会模拟；机器人具身控制；跨厂商主模型自动故障切换。 |
 
 ---
 
 ## 1. 总体边界与基础架构（第 1 章）
 
-1. **场景边界**：一期聚焦 **A. 信息与知识管理**（个人笔记整理、资料调研、PDF/网页提炼）与 **B. 本地效率与开发自动化**（本地文件处理、数据清洗、分析脚本、代码辅助）。
-2. **编排模式**：一期统一采用 **自主拆解（ReAct 循环）**；不在启动前硬编码固定业务工作流模板，而是在后续使用中通过第 9 章离线复盘从高频成功轨迹中沉淀为 Skills 与确定性脚本。
-3. **技术底座**：基于 `pi` 现有核心包二次开发，尽量复用其标准消息循环、会话 JSONL 持久化、结构化分段 System Prompt、Agent Skills 渐进式披露、基础文件/终端工具与 `packages/evals` Docker 评估框架。
+### 1.1 场景边界
+一期聚焦 **A. 信息与知识管理**（个人笔记整理、资料调研、PDF/网页提炼）与 **B. 本地效率与开发自动化**（本地文件处理、数据清洗、分析脚本、代码辅助）。
+
+### 1.2 编排模式
+一期统一采用 **自主拆解（ReAct 循环）**；不在启动前硬编码固定业务工作流模板，而是在后续使用中通过第 9 章离线复盘从高频成功轨迹中沉淀为 Skills 与确定性脚本。
+
+### 1.3 技术底座
+基于 `pi` 现有核心包二次开发（零侵入复用，`packages/*` 源码零改动），复用其标准消息循环、会话 JSONL 持久化、结构化分段 System Prompt、Agent Skills 渐进式披露、基础文件/终端工具与 `packages/evals` Docker 评估框架。
+
+### 1.4 任务运行状态机与完成口径（`MOD-007`、`PLN-006`）
+每次任务运行均生成唯一 `runId`，记录开始/结束时间、预算消耗、终止原因与计划版本，由 Harness 运行时统一管理状态流转：
+- **状态流转**：`queued -> planning -> running -> waiting_for_approval / waiting_for_input -> completed / partially_completed / failed / cancelled / budget_exceeded`。
+- **严格转换规则**：禁止通过非预期跳转掩盖错误；若未满足用户的交付条件或关键步骤未完成，**严禁标记为 `completed`**，必须如实标记为 `partially_completed`（并说明已完成部分与阻塞点）或 `failed`。
+- **审计贯通**：所有模型调用、工具执行、审批决策、中断与恢复事件均按 `runId` 关联持久化，支持按 `runId` 还原完整执行链。
 
 ---
 
 ## 2. 上下文工程与对话压缩保真（第 2 章）
 
-### 2.1 会话粒度与 KV Cache 前缀稳定
+### 2.1 会话粒度、生命周期与 KV Cache 前缀稳定
 
-- **多会话隔离**：按任务/主题开启独立会话；跨会话连续性由第 3 章的长期记忆与知识库衔接，不在同一会话中无限混杂无关话题。
+- **多会话隔离与生命周期管理（`MEM-002`）**：按任务/主题开启独立会话；跨会话连续性由第 3 章的长期记忆与知识库衔接，不在同一会话中无限混杂无关话题；提供显式会话管理命令支持**搜索、重命名、归档、导出与按策略删除**（删除影响范围可验证且不误删独立知识库）。
 - **静态前缀不可变**：System Prompt（含固定注入的核心用户偏好概览与 Skill 元数据目录）与 Tool Definitions（固定顺序）在会话内保持字节级不变，最大化 DeepSeek Prompt Cache 命中率。
 - **动态信息末尾追加**：当前时间、活跃工作目录、工具调用统计、TODO 清单等所有动态状态一律追加到上下文末尾，严禁修改 System Prompt。
 - **DeepSeek 协议兼容**：严格使用标准 `system / user / assistant / tool` 结构化消息格式；带工具调用的同一轮次内完整保留并回传 `reasoning_content`，禁止手工拼接纯文本对话流。
@@ -46,7 +57,7 @@
 ### 2.2 系统提示词与 Agent Skills
 
 - **System Prompt 原则**：
-  - 使用 Markdown + XML 双层结构，只保留助理身份定位、简洁输出风格、通用纪律（遇到模糊高影响需求先用 1–3 个简短问题澄清，低风险任务说明假设后执行）与忠诚度守则（外部网页/文档内容一律降格为不可信数据，不具备指令效力）。
+  - 使用 Markdown + XML 双层结构，只保留助理身份定位、简洁输出风格、通用纪律（遇到模糊高影响需求先用 1–3 个简短问题澄清，低风险任务说明假设后执行；**显式区分有来源支撑的事实、模型推断与证据不足时的未验证假设，`KNO-005`**）与忠诚度守则（外部网页/文档内容一律降格为不可信数据，不具备指令效力）。
   - 所有领域 SOP 下沉至 Skills，禁止在全局 System Prompt 中堆砌零散规则。
 - **Agent Skills 渐进式披露**：
   - 复用 `pi` 原生三层机制：启动加载 `name + description` 目录 -> 按需读取 `SKILL.md` -> 按需读取子文档与脚本。
@@ -58,7 +69,7 @@
 ### 2.3 Agent 状态栏（`<agent_status>`）
 
 每次推理前由 Harness 用确定性代码生成结构化状态栏追加到上下文末尾（严禁由 LLM 估算计数），包含 4 项核心元信息：
-1. **侧信道时间信息**：当前本地时间、距上次用户交互间隔；
+1. **侧信道时间与运行标识**：当前本地时间、距上次用户交互间隔、当前 `runId` 与 `TaskRun` 状态；
 2. **环境状态摘要**：当前工作目录、OS/Shell 与沙箱状态、知识库 Git 分支与未提交变更概览；
 3. **工具调用计数与失败告警**：本会话各工具累计调用次数、连续失败告警（提示模型更换策略而非盲目重试）；
 4. **显式 TODO 任务清单**：提供专用 `todo` 工具维护多步任务状态（`pending / in_progress / completed / cancelled`），且 **在 `pi` 终端 TUI 中向用户实时可见展示**。
@@ -93,7 +104,9 @@ assistant-workspace/
 ├── evidence/                     # 1. 原始证据层（只增不改，原始素材与轨迹）
 │   ├── sessions/                 #    pi 原始会话 JSONL 轨迹
 │   ├── raw_pdfs/                 #    原始 PDF（只读保护）
-│   └── artifacts/                #    网页快照、大工具输出落盘文件
+│   ├── artifacts/                #    网页快照、大工具输出落盘文件（支持留存清理）
+│   ├── traces/                   #    本地 Trace 账本与按 runId 审计日志（支持留存清理）
+│   └── feedback/                 #    /feedback 失败回流轨迹与归因草稿
 ├── knowledge/                    # 2. 知识层（唯一真相源，纳入 Git 版本管理）
 │   ├── memory/
 │   │   ├── profile/              #    Layer 1：基础回忆（YAML 结构化偏好卡片）
@@ -170,37 +183,43 @@ assistant-workspace/
      3. RRF 融合（`k = 60`，默认权重 `0.5 / 0.5`；含精确路径/代码/引号短语时提高 BM25 权重如 `0.7 / 0.3`），取 Top-25 候选池；
      4. 本地交叉编码器精排（如 `bge-reranker-v2-m3`），截断输出 **Top-6 至 Top-8**；
      5. 合并同文档相邻命中块，强制附带 `path`、`section`、`page_range` 与上下文摘要；需要全文时由模型按需调用 `read`。
-5. **Agentic RAG 工具接口**：
+5. **Agentic RAG 工具接口与引用口径**：
    - `search_knowledge(query, type?, dir?, tags?, top_k?)`
    - `search_memory(query, time_range?, entities?, top_k?)`
    - `browse_knowledge_index(dir?)`（读取目录级 L0/L1 概览 `_index.md`）
+   - **事实/推断/假设区分（`KNO-005`）**：基于检索结果作答时，须显式区分有出处支撑的事实（附文件/章节/页码/URL）、模型推断以及证据不足或来源冲突时的未验证假设。
 
-### 3.4 更新审批与隐私范围
+### 3.4 更新审批、用户记忆控制与凭证底线
 
 - **分级更新策略**：Layer 2 情景事件日志（只增不改）会话结束自动追加；修改 Layer 1 核心偏好或已有 Markdown 笔记正文时，写入工作分支/草稿区并经人工确认后合入 Git 主分支（随时可回滚）。
-- **隐私脱敏**：本期暂不启用自动隐私目录隔离与脱敏流水线。
+- **记忆用户控制（`MEM-005`）**：除直接编辑 Git 仓库内文件外，提供显式用户命令（如 `/memory list|show|edit|delete|off|on`）查看、修改、删除或关闭记忆；关闭记忆后，后续运行既不注入 `<user_profile>`，也不自动追加新事件记忆。
+- **敏感凭证底线（`MEM-007`、`SEC-008`）**：本期暂不启用通用隐私目录隔离与全量 PII 脱敏流水线，但**强制禁止将 API Key、Token、密码、私钥等明文凭证写入 `knowledge/memory/`（`profile` / `events`）、`evidence/traces/` 日志或输出文件**，写前须经过确定性凭证扫描拦截或脱敏。
 
 ---
 
 ## 4. 工具体系、多模态感知与执行安全（第 4 章）
 
-### 4.1 能力表达与一期核心工具集
+### 4.1 能力表达、工具治理与一期核心工具集
 
 遵循“**通用执行器 + Skills 优先，必要时退回专用工具**”与“**参数严格保真（严禁静默转义引号、改编码或私自追加参数）**”原则：
 
+- **工具元数据与运行期治理（`TLS-001`、`TLS-007`、`TLS-009`）**：
+  - 每个注册工具必须声明名称、用途、参数 schema、权限范围、风险等级（只读 / 可撤销写入 / 高影响）与版本号，缺少必要元数据的工具拒绝启用；
+  - 支持查看各工具健康状态与按需单工具停用（停用后不再向模型暴露 schema，调用直接拒绝）；
+  - 有副作用的工具（文件写/改/删、外部 API 写操作、二期外部连接器写入）必须支持**幂等键或执行前状态检查**，防止瞬态重试或任务恢复引发重复副作用。
 - **复用 `pi` 核心工具**：`read`（支持 offset/limit 与显式截断提示）、`grep`、`find`、`ls`、`write`、`edit`、`bash`（及容器化执行器）。
 - **新增专用工具**：
   - 上下文与状态：`todo`、`search_session_history`
   - 知识与记忆：`search_knowledge`、`search_memory`、`browse_knowledge_index`
   - 外部调研：`web_search`、`fetch_url`（结果走 L1 落盘 + `<external_content source="...">` 来源包裹）
-  - 多模态感知：`analyze_visual(file_path, question, page?)`（针对 PDF 复杂图表/扫描页/截图，内部调用**云端视觉 API**，仅返回针对问题的精炼文本分析，不将原图塞满 DeepSeek 主上下文）
-  - 人工协作：`request_human_approval` / `request_human_input`（暂停等待人工确认，并留存批准/拒绝理由供第 9 章进化学习）
+  - 多模态感知：`analyze_visual(file_path, question, page?)`（针对 PDF 复杂图表/扫描页/截图，内部调用**云端视觉 API**，仅返回针对问题的精炼文本分析，不将原图塞满 DeepSeek 主上下文；须校验**媒体输入上限 `MM-004`**：限制允许的图片/PDF 格式、单文件体积与单次最大页数，超限直接拒绝并明确说明限制）
+  - 人工协作：`request_human_approval` / `request_human_input`（暂停等待人工确认，审批绑定动作快照并关联 `runId` 留存审计与批准/拒绝理由供第 9 章进化学习）
 - **数据处理边界**：CSV/Excel/JSON/PDF 批量清洗与统计不拆成一堆专用工具，统一由 Agent 在 Docker 沙箱内写 Python 脚本执行 + 配合“数据处理 Skill”。
 
 ### 4.2 外部生态扩展策略
 
 - **CLI + Skills 优先**：自定义能力优先封装为本地脚本/CLI + `SKILL.md`。
-- **MCP 按需代理接入**：保留 `pi` 的 MCP 扩展能力，但必须采用 **延迟启动 + 代理工具按需发现**（会话启动只暴露轻量索引，按需将目标工具 schema 追加到轨迹末尾），防止静态前缀膨胀与 KV Cache 失效。
+- **MCP 按需代理接入与权限撤销（`SEC-012`）**：保留 `pi` 的 MCP 扩展能力，必须采用 **延迟启动 + 代理工具按需发现**（会话启动只暴露轻量索引，按需将目标工具 schema 追加到轨迹末尾），防止静态前缀膨胀与 KV Cache 失效；同时提供命令查看已授予的 MCP/外部连接器权限范围与一键撤销授权（撤销后新调用立即拒绝；一期覆盖 MCP，二期同步覆盖邮件/日历等连接器）。
 - **供应链门槛**：接入任何第三方 Skill 或 MCP 前必须人工审查其描述与脚本内容并锁定版本，禁止静默自动更新。
 
 ### 4.3 四层执行安全与可回滚设计（一期全量落地）
@@ -213,11 +232,14 @@ assistant-workspace/
 2. **层 2：可逆变更的写前快照 + 写后自动验证**
    - **写前可回滚点**：修改 `knowledge/` 走 Git 工作分支/commit；修改非 Git 本地数据目录前，自动将原文件备份至 `.pi/backups/<session>/<ts>/`，支持一键恢复；
    - **写后自动验证闭环**：写/改 Python 或 TypeScript 文件后自动执行语法检查/Linter；写/改 Markdown 笔记后自动校验 YAML frontmatter 语法与双链引用合法性，将结构化报错直接随工具结果返回模型立即自修。
-3. **层 3：不可逆 / 越界 / 破坏性操作两段式确认**
-   - 删除文件、覆盖原始数据、高危 Shell 命令或越界访问，必须先展示精确命令、受影响文件清单或 diff 预览，经人工批准后方可执行。
-4. **层 4：本地 Ollama Sidecar 旁路风控（一期同步落地）**
+3. **层 3：不可逆 / 越界 / 破坏性操作两段式确认与参数绑定（`SEC-004`、`SEC-009`）**
+   - 删除文件、覆盖原始数据、高危 Shell 命令或越界访问，必须先展示精确命令、受影响文件清单或 diff 预览，经人工批准后方可执行；
+   - **动作参数强绑定**：审批票据与 `{tool, canonicalArgs, targetScope}` 快照强绑定；若执行前目标、命令或参数发生任何变更，原审批自动失效，必须重新审批；
+   - **审批审计**：每次审批记录审批人、策略版本、动作快照、决定及理由，统一关联 `runId` 可按运行 ID 查询。
+4. **层 4：本地 Ollama Sidecar 旁路风控与 Fail-Closed（`SEC-010`、`TLS-008`）**
    - 在执行高风险工具（特别是 Shell/容器外命令与写入）前，调用本地 Ollama 轻量模型并行做独立安全审查；
    - **严格上下文隔离**：Sidecar 仅接收结构化调用数据 `{tool, args, target_scope}`，**绝不读取主模型的自由对话与外部网页文本**，防止被间接提示注入话术策反；
+   - **异常 Fail-Closed**：当本地 Ollama Sidecar 不可达、超时、返回非法结果，或前置策略钩子/授权状态不确定时，高风险操作一律 **fail-closed**（直接阻断或强制升级为人工两段式确认，绝不静默放行）；
    - 结合命令语义解析拦截变形危险命令（如 `find -exec rm`、`$(echo rm)`、`curl -o`）；连续被 Sidecar 拒绝触发熔断，交还人工裁决。
 
 ---
@@ -242,11 +264,12 @@ assistant-workspace/
 ### 5.3 故障恢复策略
 
 - 保留四层故障防护：**流式空闲看门狗（Watchdog）** 防流式静默卡死、瞬态 429/网络异常指数退避静默重试、**重复调用指纹检测** 防无进展死循环、**防死亡螺旋**（异常退出路径禁止再触发调 LLM 的后台钩子）。
+- **重试与恢复防重入（`TLS-009`、`NFR-003`）**：瞬态重试与异常恢复必须结合副作用工具的幂等键与写前状态检查，保证重试过程不产生重复写盘、重复外部调用或破坏性叠加。
 - **主模型不可用策略**：DeepSeek API 持续报错或限流重试耗尽后，**直接暂停并向用户明确报告错误与已尝试恢复动作**，不做跨厂商自动模型接管。
 
 ### 5.4 交付物、自检与工具沉淀
 
-- **交付物默认形态**：复杂数据分析与调研汇报 **默认生成可本地浏览器直接打开的单文件交互式 HTML 报告**（由脚本直接将数据注入图表与可筛选表格，绕过 LLM 抄数），同时保留处理后的数据文件与 Markdown 笔记；PPT/视频制作等能力不内置，后续按独立 Skill 按需扩展。
+- **交付物默认形态**：复杂数据分析与调研汇报 **默认生成可本地浏览器直接打开的单文件交互式 HTML 报告**（由脚本直接将数据注入图表与可筛选表格，绕过 LLM 抄数），同时保留处理后的数据文件与 Markdown 笔记；最终交付物（HTML/Markdown）生成前强制执行凭证扫描，严禁将 API Key/Token/密码等明文凭证写入输出文件（`SEC-008`）；PPT/视频制作等能力不内置，后续按独立 Skill 按需扩展。
 - **一期内置两项自举/运维能力**：
   1. **`doctor` 自检命令**：确定性检查 DeepSeek API、云端视觉 API、本地 Ollama（`bge-m3` / Reranker / Sidecar 模型）、Docker 引擎与沙箱镜像、知识库 Git 状态及本地索引完整性；疑难日志可交由 Agent 辅助诊断；
   2. **脚本沉淀为 Skill/工具**：跑通的高频数据处理脚本支持按指令整理为参数化脚本 + `SKILL.md`，经人工确认后归档复用。
@@ -255,10 +278,11 @@ assistant-workspace/
 
 ## 6. 交互与异步运行时（第 6 章）
 
-1. **一期：仅会话内异步（纯文字 TUI）**
+1. **一期：会话内异步 + 跨进程检查点恢复（纯文字 TUI）**
    - **取消式打断（紧急）**：用户触发中止时，立刻取消流式推理或沙箱进程，并在轨迹中为未完成工具写入显式占位符（如 `[工具已被用户中断，未完成]`，严禁伪造成功），维持同步 API 格式合法；
    - **队列式补充（常规）**：工具执行期间用户补充输入时先入队，待到达安全点（工具返回）后连同工具结果按 `[未处理事件 i/N]` 编号批量追加，防模型只看最后一条；
-   - **后台长命令监控**：提供 `monitor_shell` 异步监控长耗时容器命令，仅在完成、报错或命中关键输出时唤醒模型，避免轮询烧 token。
+   - **后台长命令监控**：提供 `monitor_shell` 异步监控长耗时容器命令，仅在完成、报错或命中关键输出时唤醒模型，避免轮询烧 token；
+   - **长任务持久化与跨进程重启恢复（`ORC-003`、`UX-005`）**：将 `TaskRun` 状态、活跃 TODO、待审批快照与已完成步骤检查点持久化至本地状态文件；当 `pi` 进程意外退出或重启时，用户可通过历史运行入口查看状态，对可恢复任务从检查点安全续跑（结合幂等键防重入），对无法恢复的执行上下文（如已销毁的临时容器进程）明确标记不可恢复原因与已完成部分（状态置为 `partially_completed` 或 `failed`）。
 2. **二期预留**：
    - 本地轻事件源（目录监听自动增量建 RAG 索引、Cron 定时任务、Windows 桌面 Toast 通知）；
    - 远程 IM/邮件多渠道（随场景 C）；
@@ -284,12 +308,13 @@ assistant-workspace/
 2. **轨迹前缀边界集（初期 10–15 题）**：冻结历史上下文到关键决策点，验证下一步动作落在“可接受动作集合”且未触发“禁止动作”，重点覆盖：模糊需求先澄清、压缩后硬约束不丢、当前显式指令覆盖旧偏好、高危/越界操作触发确认。
 3. **指标口径与评判机制**：
    - 常规能力看 `Pass@1`；安全与核心纪律（不改只读区、不伪造出处）看 **`Pass^3`（连续 3 次 0 失误）**；
-   - **评判分工**：能代码断言的绝不用 LLM；开放质量维度（摘要清晰度、HTML 可读性等）采用 **多维度 Rubric + 幻觉一票否决（Veto）**，由 **非 DeepSeek 的异源模型担任 LLM-as-a-Judge**。
+   - **评判分工**：能代码断言的绝不用 LLM；开放质量维度（摘要清晰度、HTML 可读性、是否清晰区分事实/推断/未验证假设等）采用 **多维度 Rubric + 幻觉一票否决（Veto）**，由 **非 DeepSeek 的异源模型担任 LLM-as-a-Judge**。
 
-### 7.3 本机可观测性、成本护栏与失败回流
+### 7.3 本机可观测性、成本护栏、留存与失败回流
 
-- **本地 Trace 账本**：记录每次会话与调用的输入/输出/思考 token、**DeepSeek Prompt Cache 命中率**、单轮与总耗时、工具成功率、RAG 召回明细、Sidecar 拦截记录及估算费用。
-- **预算护栏**：配置单次任务最大迭代轮次与费用提醒阈值，防异常循环烧钱。
+- **本地 Trace 账本**：所有记录统一关联 `runId`（`MOD-007`、`SEC-009`），记录每次会话与调用的输入/输出/思考 token、**DeepSeek Prompt Cache 命中率**、单轮与总耗时、工具成功率、RAG 召回明细、Sidecar 拦截与人工审批审计记录（含策略版本、动作快照与决定）及估算费用；**落盘前强制过滤明文 API Key/Token/密码等敏感凭证（`SEC-008`）**。
+- **预算护栏**：配置单次任务最大迭代轮次、最大执行时长、最大工具调用数与费用提醒阈值，达到上限后以 `budget_exceeded` 状态安全停止并输出已完成摘要，防异常循环烧钱。
+- **留存与清理（`SEC-011`、`NFR-008`）**：支持为 `evidence/traces/`、`evidence/artifacts/` 与 `.pi/backups/` 配置留存期限与清理命令，按期清理过期临时运行数据而不触碰 `knowledge/`。
 - **失败回流（`/feedback`）**：使用中遇到翻车（漏约束、做错、“做对了但说错了”）时，执行 `/feedback <简述>` 标记当前轨迹，离线定位首个错误步骤并沉淀为新的轨迹前缀回归用例。
 
 ### 7.4 可消融架构与提示词快照
@@ -341,7 +366,48 @@ assistant-workspace/
 - **二期并发与风控约束**：
   - 不做去中心化 Swarm 接力、不做无外部反馈的同模型群聊辩论、不做 A2A；
   - 目录四区隔离（子 Agent 仅写私有 `/scratch/<id>`，写入共享区或 `knowledge/` 走主 Agent 汇总或 Git worktree / 乐观锁）；
+  - **结论冲突升级（`ORC-007`）**：多个子 Agent 返回相互冲突的结论或证据不足时，主 Agent **严禁静默合并为单一确定结论**，必须并列呈现各方分歧及出处证据，升级交由用户裁决；
   - 硬限制最大并发数（≤ 3）与单子 Agent 步数/token 预算；核心架构、知识库结构与关键决策始终由人类掌控，防范理解债与认知投降。
+
+---
+
+## 11. 工程治理、非功能约束与需求追踪基线
+
+### 11.1 非功能约束（NFR）
+
+1. **离线可测试性（`NFR-007`）**：状态机、上下文压缩、双层记忆、RAG 切分与 RRF、目录/快照/凭证守卫、Sidecar fail-closed、沙箱命令构造、异步恢复与进化可信根等关键模块，必须支持使用 Mock 模型、Mock Ollama 与 Mock 工具进行确定性单元测试，**无需外部 API 账号即可跑通核心测试集**。
+2. **数据留存与清理策略（`SEC-011`、`NFR-008`）**：
+   - `evidence/artifacts/`（大工具落盘）、`.pi/backups/`（写前快照）与 `evidence/traces/`（运行账本）均须配置可调留存期限（如默认 30–90 天）与显式清理命令，过期后按策略清理；
+   - 清理策略严禁误删用户 `knowledge/` 知识库、已确认的 `profile` 与用户显式归档保留的记录。
+3. **终端可访问性（`NFR-009`）**：`pi` TUI 主流程（输入、查看 TODO、两段式审批选择、打断与恢复）必须完全支持**纯键盘操作**，报错信息保持清晰可读，说明失败原因与建议恢复步骤。
+4. **`pi` 底座版本锁定与升级回归（`NFR-010`）**：严格锁定所依赖的 `pi` 仓库/包版本并记录兼容性清单（`packages/*` 零源码改动）；每次升级 `pi` 底座前须核对 `ExtensionAPI` 与消息协议兼容性，并在升级后运行全量离线单测与第 7 章回归评估集，确保质量、安全与缓存命中率无退化。
+
+### 11.2 需求编号与追踪矩阵
+
+为便于开发拆分、测试映射与版本核对，核心需求统一采用 `PA-<领域>-<序号>` 唯一编号（括号内注明对应的通用 PRD 检查项），变更需求时同步记录变更原因、影响模块与验证更新：
+
+| 需求编号 | 核心需求摘要 | 所属阶段 | 归属章节 | 验收方式 |
+|---|---|---|---|---|
+| `PA-RUN-01` | `TaskRun` 统一状态机、唯一 `runId`、`partially_completed` 口径与终止原因（`MOD-007`/`PLN-006`） | 一期 | §1.4 | 状态流转单测 + Trace 按 `runId` 核查 |
+| `PA-RUN-02` | DeepSeek 协议兼容（`reasoning_content`）、流式看门狗、主模型故障暂停报错 | 一期 | §2.1 / §5.3 | 协议与异常注入单测 + TUI 实测 |
+| `PA-CTX-01` | 静态前缀不可变、`<agent_status>` 末尾注入、TUI 实时 TODO 面板与提示词快照 | 一期 | §2.1–§2.3 | 静态前缀哈希单测 + 缓存命中统计 |
+| `PA-CTX-02` | CJK Token 估算、L1–L3 分层压缩、保真四件套、2 次熔断与 `search_session_history` | 一期 | §2.4 | 中文长上下文压缩保真与熔断单测 |
+| `PA-CTX-03` | 回答区分事实（附出处）、模型推断与未验证假设（`KNO-005`） | 一期 | §2.2 / §3.3 | 提示词快照 + Judge Rubric 校验 |
+| `PA-MEM-01` | 三层目录分离、YAML Profile、ADD-only JSONL Events（`supersedes`）与分级确认更新 | 一期 | §3.1–§3.2 / §3.4 | Schema/冲突链单测 + Git 回滚验证 |
+| `PA-MEM-02` | 会话搜索/重命名/归档/导出/删除与记忆查看/修改/删除/开关命令（`MEM-002`/`MEM-005`） | 一期 | §2.1 / §3.4 | 命令交互与持久化单测 |
+| `PA-MEM-03` | 1000+ Markdown/PDF 结构感知切分、L1/L2 前缀与本地 Ollama 混合 RAG（FTS5+`bge-m3`+Rerank） | 一期 | §3.3 | 增量建索引单测 + 黄金集消融指标 |
+| `PA-TLS-01` | 工具元数据/风险分级校验、健康状态、单工具停用与 MCP 按需代理/权限撤销（`TLS-001/007`/`SEC-012`） | 一期 | §4.1–§4.2 | 注册拦截、停用与撤销调用单测 |
+| `PA-TLS-02` | `analyze_visual` 云端视觉分析与媒体格式/大小/页数上限控制（`MM-004`） | 一期 | §4.1 | 超限拒绝单测 + PDF 图表实测 |
+| `PA-SEC-01` | 路径边界校验、写前快照/Git 回滚与写后 Linter/YAML/双链自动验证 | 一期 | §4.3 | 越界拒绝、回滚与写后校验单测 |
+| `PA-SEC-02` | 两段式审批绑定具体动作+参数快照（变参重审）与按 `runId` 留存审计（`SEC-004`/`SEC-009`） | 一期 | §4.3 | 篡改参数失效单测 + 审计查询验证 |
+| `PA-SEC-03` | 上下文隔离的本地 Ollama Sidecar 与安全异常 **fail-closed** 规则（`SEC-010`/`TLS-008`） | 一期 | §4.3 | 上下文隔离与 Sidecar 断连阻断单测 |
+| `PA-SEC-04` | 明文密钥/Token 禁止写入记忆、普通日志与交付产物（`MEM-007`/`SEC-008`） | 一期 | §3.4 / §7.3 | 敏感凭证注入拦截单测 |
+| `PA-SEC-05` | 副作用工具幂等键/防重入保护与 Windows Docker 断网只读沙箱（`TLS-009`/`NFR-003`） | 一期 | §4.1 / §5.1 / §5.3 | 重试防重入单测 + 容器边界实测 |
+| `PA-ASY-01` | 会话内安全打断占位符、队列编号补充、`monitor_shell` 与跨进程任务检查点恢复（`ORC-003`/`UX-005`） | 一期 | §6 | 中断协议合法性、队列与重启恢复单测 |
+| `PA-EVAL-01` | RAG 消融评估、E2E/轨迹前缀回归集（`Pass^3`）、异源 Judge Veto、Trace/预算与 `/feedback` | 一期 | §7 | 自动化评估流水线 + 预算停止验证 |
+| `PA-EVO-01` | 数据隔离契约、手动 `/evolve` 离线三类提案、不可自改可信根与产物激活率跟踪 | 一期 | §8–§9 | 数据契约、可信根拦截与回归验证 |
+| `PA-NFR-01` | 离线 Mock 测试、留存期清理、纯键盘 TUI 与 `pi` 版本锁定升级回归（`NFR-007~010`/`SEC-011`） | 一期 | §11.1 | 无网单测 + 清理验证 + 升级回归清单 |
+| `PA-MA-01` | 星型只读子 Agent、HTML 跨模态 Reviewer、子 Agent 冲突升级（`ORC-007`）与 Curator 修剪 | 二期 | §9.3 / §10 | 二期并发、冲突升级与预算隔离测试 |
 
 ---
 
@@ -349,10 +415,10 @@ assistant-workspace/
 
 | 需求模块 | `pi` 现有能力（可直接复用） | 一期二次开发重点 |
 |---|---|---|
-| 核心循环与模型协议 | `packages/agent`、`packages/ai`（中立消息与流式工具循环） | 校验 DeepSeek `reasoning_content` 回传与 Prompt Cache 统计；主模型故障暂停报错与空闲看门狗 |
-| System Prompt 与 Skills | `packages/coding-agent/src/core/system-prompt.ts`、`skills.ts` | 改写为个人助理静态前缀骨架 + 注入 `<user_profile>`；新增笔记整理与数据处理首批 Skills |
-| 状态栏与 TUI | `packages/coding-agent` TUI 渲染框架 | 新增上下文末尾确定性 `<agent_status>` 注入、专用 `todo` 工具与 TUI 实时 TODO 面板 |
-| 上下文压缩与保真 | `packages/coding-agent/src/core/compaction/compaction.ts`、`session-manager.ts`（`context_edit`） | 修正中文 token 估算与 70%–75% 阈值；补齐 L1 写时落盘冻结预览、L2 批量清噪声、外置状态/Pin/代码挂载 `SourceIndex`、熔断器与 `search_session_history` |
-| 记忆与本地混合 RAG | 无（全新模块） | 实现三层目录骨架、YAML Profile / JSONL Events、Markdown/PDF 结构感知切分、SQLite FTS5 中文 BM25 + Ollama `bge-m3` + Rerank 混合检索与 3 个 Agentic RAG 工具 |
-| 工具、视觉、安全与沙箱 | `packages/coding-agent/src/core/tools/`、`mcp-servers.ts` | 增补 `web_search` / `fetch_url` / `analyze_visual`（云端视觉 API）/ HITL / `monitor_shell`；实现目录边界、写前快照、写后自动校验、本地 Ollama Sidecar 与 Windows Docker 沙箱适配器；MCP 代理延迟发现 |
-| 自检、评估与持续进化 | `packages/evals`（Docker 评估与报告骨架） | 扩展 RAG 召回率评估流水线、端到端与轨迹前缀回归集、异源 LLM-as-a-Judge、本地 Trace 账本、`/feedback`、`doctor` 命令与 `/evolve` 离线提案工作流 |
+| 核心循环、状态机与模型协议 | `packages/agent`、`packages/ai`（中立消息与流式工具循环） | 封装 `TaskRun` 状态机与 `runId`；校验 DeepSeek `reasoning_content` 回传与 Prompt Cache 统计；主模型故障暂停报错与空闲看门狗 |
+| System Prompt 与 Skills | `packages/coding-agent/src/core/system-prompt.ts`、`skills.ts` | 通过扩展组装个人助理静态前缀骨架 + 注入 `<user_profile>` + 事实/推断/假设区分纪律；新增笔记整理与数据处理首批 Skills |
+| 状态栏、会话管理与 TUI | `packages/coding-agent` TUI 渲染框架与会话 JSONL | 新增上下文末尾确定性 `<agent_status>` 注入、专用 `todo` 工具与纯键盘 TUI 实时 TODO 面板；新增 `/session` 会话生命周期管理命令 |
+| 上下文压缩与保真 | `packages/coding-agent/src/core/compaction/compaction.ts`、`session-manager.ts`（`context_edit`） | 通过扩展修正中文 token 估算与 70%–75% 阈值；补齐 L1 写时落盘冻结预览、L2 批量清噪声、外置状态/Pin/代码挂载 `SourceIndex`、熔断器与 `search_session_history` |
+| 记忆与本地混合 RAG | 无（全新模块） | 实现三层目录骨架、YAML Profile / JSONL Events、凭证写入守卫、`/memory` 控制命令、Markdown/PDF 结构感知切分、SQLite FTS5 中文 BM25 + Ollama `bge-m3` + Rerank 混合检索与 3 个 Agentic RAG 工具 |
+| 工具治理、视觉、安全与沙箱 | `packages/coding-agent/src/core/tools/`、`mcp-servers.ts` | 增补 `web_search` / `fetch_url` / `analyze_visual`（带媒体上限）/ HITL（参数绑定审批与审计）/ `monitor_shell` 与跨进程检查点恢复；实现工具元数据/停用治理、副作用幂等保护、目录边界、写前快照、写后自动校验、本地 Ollama Sidecar（fail-closed）与 Windows Docker 沙箱适配器；MCP 代理延迟发现与权限撤销 |
+| 自检、评估、留存与持续进化 | `packages/evals`（Docker 评估与报告骨架） | 扩展 RAG 召回率评估流水线、端到端与轨迹前缀回归集、异源 LLM-as-a-Judge、本地 Trace 账本（含脱敏与留存清理）、离线 Mock 测试、`/feedback`、`doctor` 命令与 `/evolve` 离线提案工作流 |
